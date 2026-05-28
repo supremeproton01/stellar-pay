@@ -17,3 +17,4 @@ export type {
   IdentityDocument,
   FileContent,
 } from './interfaces/customer.interface';
+export type { KycStatusResponse } from './interfaces/kyc.interface';
