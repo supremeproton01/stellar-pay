@@ -1,10 +1,17 @@
-// src/anchor.service.ts
-var AnchorService = class {
-  transactions = /* @__PURE__ */ new Map();
-  registerTransaction(tx) {
+import type { RefundResult } from './interfaces/refund-result.interface';
+import type {
+  AnchorTransaction,
+  AnchorTransactionStatus,
+} from './interfaces/transaction.interface';
+
+export class AnchorService {
+  private readonly transactions = new Map<string, AnchorTransaction>();
+
+  registerTransaction(tx: AnchorTransaction): void {
     this.transactions.set(tx.id, { ...tx, amountRefunded: tx.amountRefunded ?? 0 });
   }
-  async processAnchorRefund(transactionId) {
+
+  async processAnchorRefund(transactionId: string): Promise<RefundResult> {
     const tx = this.transactions.get(transactionId);
     if (!tx) {
       return {
@@ -13,47 +20,53 @@ var AnchorService = class {
         amountRefunded: 0,
         totalAmount: 0,
         isPartialRefund: false,
-        status: "failed",
+        status: 'failed',
         error: `Transaction ${transactionId} not found`,
-        refundedAt: (/* @__PURE__ */ new Date()).toISOString()
+        refundedAt: new Date().toISOString(),
       };
     }
-    if (tx.status === "refunded") {
+
+    if (tx.status === 'refunded') {
       return {
         transactionId,
         success: false,
         amountRefunded: tx.amountRefunded,
         totalAmount: tx.amount,
         isPartialRefund: false,
-        status: "failed",
-        error: "Transaction has already been fully refunded",
-        refundedAt: (/* @__PURE__ */ new Date()).toISOString()
+        status: 'failed',
+        error: 'Transaction has already been fully refunded',
+        refundedAt: new Date().toISOString(),
       };
     }
-    if (tx.status !== "failed") {
+
+    if (tx.status !== 'failed') {
       return {
         transactionId,
         success: false,
         amountRefunded: tx.amountRefunded,
         totalAmount: tx.amount,
         isPartialRefund: false,
-        status: "failed",
+        status: 'failed',
         error: `Transaction is in status '${tx.status}' and cannot be refunded`,
-        refundedAt: (/* @__PURE__ */ new Date()).toISOString()
+        refundedAt: new Date().toISOString(),
       };
     }
+
     const remaining = tx.amount - tx.amountRefunded;
     const isPartial = tx.amountRefunded > 0 && remaining > 0;
+
     tx.amountRefunded = tx.amount;
-    tx.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
-    let newStatus;
+    tx.updatedAt = new Date().toISOString();
+
+    let newStatus: AnchorTransactionStatus;
     if (isPartial) {
-      newStatus = "partially_refunded";
+      newStatus = 'partially_refunded';
     } else {
-      newStatus = "refunded";
+      newStatus = 'refunded';
     }
     tx.status = newStatus;
     this.transactions.set(tx.id, tx);
+
     return {
       transactionId,
       success: true,
@@ -61,16 +74,15 @@ var AnchorService = class {
       totalAmount: tx.amount,
       isPartialRefund: isPartial,
       status: newStatus,
-      refundedAt: (/* @__PURE__ */ new Date()).toISOString()
+      refundedAt: new Date().toISOString(),
     };
   }
-  getTransaction(id) {
+
+  getTransaction(id: string): AnchorTransaction | undefined {
     return this.transactions.get(id);
   }
-  getAllTransactions() {
+
+  getAllTransactions(): AnchorTransaction[] {
     return Array.from(this.transactions.values());
   }
-};
-export {
-  AnchorService
-};
+}
