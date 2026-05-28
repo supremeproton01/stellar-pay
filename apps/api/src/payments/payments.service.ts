@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { type CreatePaymentIntentDto } from './dto/create-payment-intent.dto.js';
 
-interface StoredIntent {
+export interface StoredIntent {
   paymentId: string;
   paymentReference: string;
   merchantId: string;
@@ -59,5 +59,9 @@ export class PaymentsService {
       created_at: now.toISOString(),
       expires_at: expiresAt.toISOString(),
     };
+  }
+
+  findOne(paymentId: string): StoredIntent | undefined {
+    return this.intents.get(paymentId);
   }
 }
