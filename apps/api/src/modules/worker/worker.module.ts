@@ -6,5 +6,6 @@ import { RedemptionRepository } from '../database/redemption.repository';
 @Module({
   imports: [ScheduleModule.forRoot()],
   providers: [WithdrawalProcessor, RedemptionRepository],
+  exports: [RedemptionRepository],
 })
 export class WorkerModule {}
