@@ -1,4 +1,5 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
+import * as StellarSdk from '@stellar/stellar-sdk';
 import { AssetReserve, RedeemResponse } from './interfaces/proof-of-reserves.interface';
 import { RedemptionRepository } from '../modules/database/redemption.repository';
 import { RedeemDto } from './dto/redeem.dto';
@@ -9,36 +10,72 @@ interface MerchantBalance {
   balance: number;
 }
 
+interface HorizonAssetRecord {
+  amount?: string;
+}
+
+interface HorizonBalanceRecord {
+  asset_code?: string;
+  asset_issuer?: string;
+  balance: string;
+}
+
+interface SorobanBurnResult {
+  hash?: string;
+  transactionHash?: string;
+  id?: string;
+}
+
+interface SorobanClient {
+  contractCall(
+    contractId: string,
+    functionName: string,
+    args: unknown[],
+  ): Promise<SorobanBurnResult>;
+}
+
+interface SorobanClientConstructor {
+  new (url: string): SorobanClient;
+}
+
 @Injectable()
 export class TreasuryService {
   // In-memory merchant balances for validation (stub)
   private readonly merchantBalances: MerchantBalance[] = [];
 
-  constructor(private readonly redemptionRepo: RedemptionRepository) {}
+  private readonly horizonUrl =
+    process.env.STELLAR_HORIZON_URL ?? 'https://horizon-testnet.stellar.org';
 
-  async getTotalSupply(_assetCode: string): Promise<string> {
-    // TODO: Implement actual on-chain supply query using @stellar/stellar-sdk
-    // Example:
-    // const horizon = new Horizon.Server(process.env.STELLAR_HORIZON_URL);
-    // const asset = new Asset(assetCode, process.env.ISSUER_PUBLIC_KEY);
-    // const accounts = await horizon.accounts().forAsset(asset).call();
-    // return accounts.records.reduce((sum, acc) => {
-    //   const balance = acc.balances.find((b: any) => b.asset_code === assetCode);
-    //   return sum + (balance ? parseFloat(balance.balance) : 0);
-    // }, 0).toString();
+  private readonly issuerPublicKey = process.env.ISSUER_PUBLIC_KEY;
 
-    return '0';
+  private get horizonServer(): StellarSdk.Horizon.Server {
+    return new StellarSdk.Horizon.Server(this.horizonUrl);
   }
 
-  async getTreasuryBalance(_assetCode: string, _treasuryAddress: string): Promise<string> {
-    // TODO: Implement actual treasury cold storage balance query
-    // Example:
-    // const horizon = new Horizon.Server(process.env.STELLAR_HORIZON_URL);
-    // const account = await horizon.loadAccount(treasuryAddress);
-    // const balance = account.balances.find((b: any) => b.asset_code === assetCode);
-    // return balance?.balance ?? '0';
+  constructor(private readonly redemptionRepo: RedemptionRepository) {}
 
-    return '0';
+  private getAssetIssuer(): string {
+    if (!this.issuerPublicKey) {
+      throw new BadRequestException('Missing ISSUER_PUBLIC_KEY environment variable');
+    }
+    return this.issuerPublicKey;
+  }
+
+  async getTotalSupply(assetCode: string): Promise<string> {
+    const issuer = this.getAssetIssuer();
+    const response = await this.horizonServer.assets().forCode(assetCode).forIssuer(issuer).call();
+
+    const assetRecord = response.records?.[0] as HorizonAssetRecord | undefined;
+    return assetRecord?.amount ?? '0';
+  }
+
+  async getTreasuryBalance(assetCode: string, treasuryAddress: string): Promise<string> {
+    const issuer = this.getAssetIssuer();
+    const account = await this.horizonServer.loadAccount(treasuryAddress);
+    const balance = account.balances.find(
+      (b): b is HorizonBalanceRecord => b.asset_code === assetCode && b.asset_issuer === issuer,
+    );
+    return balance?.balance ?? '0';
   }
 
   calculateReserveRatio(treasuryBalance: string, totalSupply: string): number {
@@ -82,15 +119,29 @@ export class TreasuryService {
       );
     }
 
-    // 2. Invoke Soroban burn function (stub)
-    // TODO: Call Soroban contract burn function when contract is deployed
-    // const sorobanClient = new SorobanClient(process.env.SOROBAN_RPC_URL);
-    // const burnTx = await sorobanClient.contractCall(
-    //   process.env.MIRROR_ASSET_CONTRACT_ID,
-    //   'burn',
-    //   [merchantId, dto.amount, dto.currency],
-    // );
-    const burnTxHash = `burn_${crypto.randomUUID().split('-').join('').slice(0, 16)}`;
+    const sorobanRpcUrl = process.env.SOROBAN_RPC_URL;
+    const contractId = process.env.MIRROR_ASSET_CONTRACT_ID;
+    if (!sorobanRpcUrl || !contractId) {
+      throw new BadRequestException(
+        'SOROBAN_RPC_URL and MIRROR_ASSET_CONTRACT_ID must be configured for redemption',
+      );
+    }
+
+    // 2. Invoke Soroban burn function
+    const SorobanClient = (StellarSdk as unknown as { SorobanClient: SorobanClientConstructor })
+      .SorobanClient;
+    const sorobanClient = new SorobanClient(sorobanRpcUrl);
+    const burnTx = await sorobanClient.contractCall(contractId, 'burn', [
+      merchantId,
+      dto.amount.toString(),
+      dto.currency,
+    ]);
+
+    const burnTxHash =
+      burnTx.hash ||
+      burnTx.transactionHash ||
+      burnTx.id ||
+      `burn_${crypto.randomUUID().split('-').join('').slice(0, 16)}`;
 
     // 3. Deduct balance after successful burn
     balance.balance -= dto.amount;

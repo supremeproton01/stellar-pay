@@ -27,6 +27,12 @@ interface CustomerRecord {
   updatedAt: string;
 }
 
+interface KycValidationError {
+  isValid: boolean;
+  invalidFields?: string[];
+  errors?: Record<string, string>;
+}
+
 interface Sep31PaymentRecord {
   paymentId: string;
   senderId: string;
@@ -52,15 +58,25 @@ export class AnchorService {
   // ---------------------------------------------------------------------------
 
   async createSep31DirectPayment(params: DirectPaymentParams): Promise<DirectPaymentResult> {
-    const senderValid = this.validateKyc(params.senderKyc);
-    const receiverValid = this.validateKyc(params.receiverKyc);
+    const senderValidation = this.validateKyc(params.senderKyc);
+    const receiverValidation = this.validateKyc(params.receiverKyc);
 
-    if (!senderValid) {
-      return this.buildError(params, 'Sender KYC validation failed');
+    if (!senderValidation.isValid) {
+      const errorMsg = senderValidation.errors
+        ? `Sender KYC validation failed: ${Object.entries(senderValidation.errors)
+            .map(([k, v]) => `${k}: ${v}`)
+            .join(', ')}`
+        : 'Sender KYC validation failed';
+      return this.buildError(params, errorMsg);
     }
 
-    if (!receiverValid) {
-      return this.buildError(params, 'Receiver KYC validation failed');
+    if (!receiverValidation.isValid) {
+      const errorMsg = receiverValidation.errors
+        ? `Receiver KYC validation failed: ${Object.entries(receiverValidation.errors)
+            .map(([k, v]) => `${k}: ${v}`)
+            .join(', ')}`
+        : 'Receiver KYC validation failed';
+      return this.buildError(params, errorMsg);
     }
 
     const paymentId = `sep31_${crypto.randomUUID().split('-').join('').slice(0, 16)}`;
@@ -125,8 +141,149 @@ export class AnchorService {
     return Array.from(this.payments.values());
   }
 
-  private validateKyc(_kyc: Record<string, unknown> | Sep12KycData): boolean {
-    return true;
+  private validateKyc(kyc: Record<string, unknown> | Sep12KycData): KycValidationError {
+    const errors: Record<string, string> = {};
+    const invalidFields: string[] = [];
+
+    // Type guard to ensure we have the right structure
+    const kycData = kyc as Sep12KycData & Record<string, unknown>;
+
+    // =========================================================================
+    // Check required fields
+    // =========================================================================
+    if (!kycData.firstName || typeof kycData.firstName !== 'string' || !kycData.firstName.trim()) {
+      errors['firstName'] = 'First name is required and must be a non-empty string';
+      invalidFields.push('firstName');
+    }
+
+    if (!kycData.lastName || typeof kycData.lastName !== 'string' || !kycData.lastName.trim()) {
+      errors['lastName'] = 'Last name is required and must be a non-empty string';
+      invalidFields.push('lastName');
+    }
+
+    if (!kycData.email || typeof kycData.email !== 'string' || !kycData.email.trim()) {
+      errors['email'] = 'Email is required and must be a non-empty string';
+      invalidFields.push('email');
+    }
+
+    if (
+      !kycData.countryCode ||
+      typeof kycData.countryCode !== 'string' ||
+      !kycData.countryCode.trim()
+    ) {
+      errors['countryCode'] = 'Country code is required and must be a non-empty string';
+      invalidFields.push('countryCode');
+    }
+
+    // =========================================================================
+    // Field format validation
+    // =========================================================================
+
+    // Email validation regex
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (kycData.email && typeof kycData.email === 'string' && !emailRegex.test(kycData.email)) {
+      errors['email'] = 'Email format is invalid';
+      if (!invalidFields.includes('email')) {
+        invalidFields.push('email');
+      }
+    }
+
+    // Phone number validation: basic international format
+    if (kycData.phoneNumber && typeof kycData.phoneNumber === 'string') {
+      const phoneRegex = /^\+?[1-9]\d{1,14}$/; // E.164 format
+      if (!phoneRegex.test(kycData.phoneNumber.replace(/[\s\-()]/g, ''))) {
+        errors['phoneNumber'] = 'Phone number must be in valid international format';
+        invalidFields.push('phoneNumber');
+      }
+    }
+
+    // =========================================================================
+    // Country-specific field requirements
+    // =========================================================================
+    const countryCode = (kycData.countryCode as string)?.toUpperCase();
+
+    // US: Requires SSN (stored in bankAccountNumber for this implementation)
+    if (countryCode === 'US') {
+      if (!kycData.bankAccountNumber) {
+        errors['bankAccountNumber'] = 'SSN is required for US residents';
+        invalidFields.push('bankAccountNumber');
+      } else if (typeof kycData.bankAccountNumber === 'string') {
+        // Basic SSN validation: XXX-XX-XXXX or XXXXXXXXX
+        const ssnRegex = /^\d{3}-?\d{2}-?\d{4}$/;
+        if (!ssnRegex.test(kycData.bankAccountNumber)) {
+          errors['bankAccountNumber'] = 'SSN must be in format XXX-XX-XXXX or XXXXXXXXX';
+          invalidFields.push('bankAccountNumber');
+        }
+      }
+    }
+
+    // EU countries: Require date of birth
+    const euCountries = [
+      'AT',
+      'BE',
+      'BG',
+      'HR',
+      'CY',
+      'CZ',
+      'DK',
+      'EE',
+      'FI',
+      'FR',
+      'DE',
+      'GR',
+      'HU',
+      'IE',
+      'IT',
+      'LV',
+      'LT',
+      'LU',
+      'MT',
+      'NL',
+      'PL',
+      'PT',
+      'RO',
+      'SK',
+      'SI',
+      'ES',
+      'SE',
+    ];
+    if (euCountries.includes(countryCode)) {
+      if (!kycData.dateOfBirth) {
+        errors['dateOfBirth'] = 'Date of birth is required for EU residents';
+        invalidFields.push('dateOfBirth');
+      } else if (typeof kycData.dateOfBirth === 'string') {
+        // Validate ISO date format YYYY-MM-DD
+        const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+        if (!dateRegex.test(kycData.dateOfBirth)) {
+          errors['dateOfBirth'] = 'Date of birth must be in YYYY-MM-DD format';
+          invalidFields.push('dateOfBirth');
+        } else {
+          const dob = new Date(kycData.dateOfBirth);
+          if (isNaN(dob.getTime())) {
+            errors['dateOfBirth'] = 'Date of birth is not a valid date';
+            invalidFields.push('dateOfBirth');
+          } else {
+            // Check if person is at least 18 years old
+            const today = new Date();
+            const age = today.getFullYear() - dob.getFullYear();
+            const monthDiff = today.getMonth() - dob.getMonth();
+            if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < dob.getDate())) {
+              if (age < 18) {
+                errors['dateOfBirth'] = 'Must be at least 18 years old';
+                invalidFields.push('dateOfBirth');
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // Return structured validation result
+    return {
+      isValid: invalidFields.length === 0,
+      invalidFields: invalidFields.length > 0 ? invalidFields : undefined,
+      errors: Object.keys(errors).length > 0 ? errors : undefined,
+    };
   }
 
   private buildError(params: DirectPaymentParams, error: string): DirectPaymentResult {

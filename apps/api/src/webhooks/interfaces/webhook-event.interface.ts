@@ -13,9 +13,17 @@ export interface WebhookEventPayload {
 
 export interface WebhookDeliveryAttempt {
   id: string;
-  webhook_id: string;
-  event_type: WebhookEventType;
-  payload: WebhookEventPayload;
+  merchantId: string;
+  url: string;
+  secret: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface WebhookJobData {
+  webhookId: string;
+  eventId: string;
+  merchantId: string;
   url: string;
   status: 'pending' | 'success' | 'failed';
   response_code?: number;

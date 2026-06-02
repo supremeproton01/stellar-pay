@@ -7,18 +7,18 @@ import type {
   WebhookJobData,
   WebhookEndpointRecord,
 } from './interfaces/webhook-event.interface';
+import { PrismaService } from '../prisma/prisma.service';
 
 const RETRY_DELAYS = [10_000, 60_000, 300_000, 1_800_000]; // 10s, 1m, 5m, 30m
 
 @Injectable()
 export class WebhooksService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(WebhooksService.name);
-  private readonly endpoints = new Map<string, WebhookEndpointRecord>();
   private readonly failedDeliveries = new Map<string, WebhookDelivery[]>();
   private readonly queue: Queue;
   private readonly worker: Worker;
 
-  constructor() {
+  constructor(private readonly prisma: PrismaService) {
     const connection = {
       host: process.env.REDIS_HOST || 'localhost',
       port: parseInt(process.env.REDIS_PORT || '6379', 10),
@@ -39,34 +39,65 @@ export class WebhooksService implements OnModuleInit, OnModuleDestroy {
     await this.queue.close();
   }
 
-  createEndpoint(merchantId: string, url: string, secret: string): WebhookEndpointRecord {
-    const id = randomUUID();
-    const record: WebhookEndpointRecord = {
-      id,
-      merchantId,
-      url,
-      secret,
-      createdAt: new Date().toISOString(),
+  private formatEndpoint(record: {
+    id: string;
+    merchantId: string;
+    url: string;
+    secret: string;
+    createdAt: Date;
+    updatedAt: Date;
+  }): WebhookEndpointRecord {
+    return {
+      id: record.id,
+      merchantId: record.merchantId,
+      url: record.url,
+      secret: record.secret,
+      createdAt: record.createdAt.toISOString(),
+      updatedAt: record.updatedAt.toISOString(),
     };
-    this.endpoints.set(id, record);
-    return record;
   }
 
-  getEndpoints(merchantId?: string): WebhookEndpointRecord[] {
-    const all = Array.from(this.endpoints.values());
-    return merchantId ? all.filter((e) => e.merchantId === merchantId) : all;
+  async createEndpoint(
+    merchantId: string,
+    url: string,
+    secret: string,
+  ): Promise<WebhookEndpointRecord> {
+    const record = await this.prisma.webhookEndpoint.create({
+      data: {
+        merchantId,
+        url,
+        secret,
+      },
+    });
+
+    return this.formatEndpoint(record);
   }
 
-  getEndpoint(id: string): WebhookEndpointRecord | undefined {
-    return this.endpoints.get(id);
+  async getEndpoints(merchantId?: string): Promise<WebhookEndpointRecord[]> {
+    const endpoints = await this.prisma.webhookEndpoint.findMany({
+      where: merchantId ? { merchantId } : undefined,
+    });
+
+    return endpoints.map((endpoint) => this.formatEndpoint(endpoint));
   }
 
-  deleteEndpoint(id: string): boolean {
-    return this.endpoints.delete(id);
+  async getEndpoint(id: string): Promise<WebhookEndpointRecord | undefined> {
+    const endpoint = await this.prisma.webhookEndpoint.findUnique({ where: { id } });
+    return endpoint ? this.formatEndpoint(endpoint) : undefined;
+  }
+
+  async deleteEndpoint(id: string): Promise<boolean> {
+    const endpoint = await this.prisma.webhookEndpoint.findUnique({ where: { id } });
+    if (!endpoint) {
+      return false;
+    }
+
+    await this.prisma.webhookEndpoint.delete({ where: { id } });
+    return true;
   }
 
   async dispatchEvent(type: string, payload: Record<string, unknown>): Promise<void> {
-    const activeEndpoints = Array.from(this.endpoints.values());
+    const activeEndpoints = await this.prisma.webhookEndpoint.findMany();
 
     for (const endpoint of activeEndpoints) {
       const event: WebhookEvent = {

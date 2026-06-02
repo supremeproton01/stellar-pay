@@ -28,8 +28,8 @@ export class WebhooksController {
   }
 
   @Get(':id')
-  getEndpoint(@Param('id') id: string) {
-    const endpoint = this.webhooksService.getEndpoint(id);
+  async getEndpoint(@Param('id') id: string) {
+    const endpoint = await this.webhooksService.getEndpoint(id);
     if (!endpoint) {
       throw new NotFoundException(`Webhook endpoint ${id} not found`);
     }
@@ -38,8 +38,8 @@ export class WebhooksController {
 
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
-  deleteEndpoint(@Param('id') id: string) {
-    const deleted = this.webhooksService.deleteEndpoint(id);
+  async deleteEndpoint(@Param('id') id: string) {
+    const deleted = await this.webhooksService.deleteEndpoint(id);
     if (!deleted) {
       throw new NotFoundException(`Webhook endpoint ${id} not found`);
     }
