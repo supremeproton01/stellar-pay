@@ -1,27 +1,17 @@
-export interface WebhookEvent {
-  webhookId: string;
-  merchantId: string;
-  url: string;
-  secret: string;
-  type: string;
-  payload: Record<string, unknown>;
-  createdAt: string;
+export enum WebhookEventType {
+  PAYMENT_CREATED = 'payment.created',
+  PAYMENT_DETECTED = 'payment.detected',
+  PAYMENT_CONFIRMED = 'payment.confirmed',
+  PAYMENT_FAILED = 'payment.failed',
 }
 
-export interface WebhookDelivery {
-  webhookId: string;
-  eventId: string;
-  merchantId: string;
-  url: string;
-  type: string;
-  attempt: number;
-  status: 'success' | 'failed';
-  statusCode?: number;
-  error?: string;
-  deliveredAt: string;
+export interface WebhookEventPayload {
+  event: WebhookEventType;
+  data: Record<string, unknown>;
+  timestamp: string;
 }
 
-export interface WebhookEndpointRecord {
+export interface WebhookDeliveryAttempt {
   id: string;
   merchantId: string;
   url: string;
@@ -35,9 +25,11 @@ export interface WebhookJobData {
   eventId: string;
   merchantId: string;
   url: string;
-  secret: string;
-  type: string;
-  payload: Record<string, unknown>;
-  attempt: number;
-  maxAttempts: number;
+  status: 'pending' | 'success' | 'failed';
+  response_code?: number;
+  response_body?: string;
+  error_message?: string;
+  attempt_number: number;
+  created_at: string;
+  delivered_at?: string;
 }

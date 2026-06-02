@@ -14,7 +14,6 @@ import { WorkerModule } from '../modules/worker/worker.module';
   imports: [WorkerModule],
   controllers: [TreasuryController],
   providers: [TreasuryService],
-  // Export so payments-engine and other modules can inject TreasuryService
   exports: [TreasuryService],
 })
 export class TreasuryModule {}
