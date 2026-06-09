@@ -6,6 +6,7 @@ import { AppService } from './app.service';
 import { HealthModule } from './health/health.module';
 import { TreasuryModule } from './treasury/treasury.module';
 import { AuthModule } from './auth/auth.module';
+import { ApiKeysModule } from './api-keys/api-keys.module.js';
 import { AuditLogModule } from './audit-log/audit-log.module';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { ThrottlerRedisGuard } from './rate-limiter/guards/throttler-redis.guard';
@@ -16,6 +17,7 @@ import { PaymentsModule } from './payments/payments.module';
 
 @Module({
   imports: [
+    ApiKeysModule,
     AuditLogModule,
     HealthModule,
     TreasuryModule,
