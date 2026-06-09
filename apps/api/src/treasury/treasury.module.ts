@@ -1,3 +1,10 @@
+/**
+ * apps/api/src/treasury/treasury.module.ts
+ *
+ * Import this module into AppModule:
+ *   imports: [TreasuryModule, ...]
+ */
+
 import { Module } from '@nestjs/common';
 import { TreasuryController } from './treasury.controller';
 import { TreasuryService } from './treasury.service';
