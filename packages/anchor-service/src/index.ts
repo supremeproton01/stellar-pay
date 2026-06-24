@@ -11,6 +11,10 @@ export type {
   AnchorTransactionStatus,
 } from './interfaces/transaction.interface';
 export type {
+  HistoryParams,
+  TransactionHistoryResult,
+} from './interfaces/transaction-history.interface';
+export type {
   CustomerData,
   CustomerPutResponse,
   CustomerStatus,
