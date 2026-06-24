@@ -30,21 +30,122 @@ var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: tru
 // src/index.ts
 var index_exports = {};
 __export(index_exports, {
-  StellarService: () => StellarService
+  StellarService: () => StellarService,
+  buildChannelCloseTransaction: () => buildChannelCloseTransaction,
+  closePaymentChannel: () => closePaymentChannel
 });
 module.exports = __toCommonJS(index_exports);
 
-// src/stellar.service.ts
+// src/payment-channel.ts
 var StellarSdk = __toESM(require("stellar-sdk"));
+function resolveAsset(asset) {
+  const code = asset.code?.trim();
+  const isNative = !code || code === "native" || code === "XLM";
+  if (isNative) {
+    if (asset.issuer) {
+      throw new Error("Native asset cannot include an issuer");
+    }
+    return StellarSdk.Asset.native();
+  }
+  if (!asset.issuer) {
+    throw new Error(`Issuer is required for asset ${code}`);
+  }
+  return new StellarSdk.Asset(code, asset.issuer);
+}
+function normalizeFee(fee) {
+  const feeValue = fee === void 0 ? Number(StellarSdk.BASE_FEE) : Number(fee);
+  if (!Number.isFinite(feeValue) || feeValue <= 0) {
+    throw new Error(`Invalid fee: ${String(fee)}`);
+  }
+  return String(Math.trunc(feeValue));
+}
+function assertChannelReadyToClose(channel) {
+  if (channel.status === "closed") {
+    throw new Error(`Payment channel ${channel.id} is already closed`);
+  }
+  if (!channel.distributions.length) {
+    throw new Error("Payment channel close requires at least one distribution");
+  }
+  if (!channel.signers.length) {
+    throw new Error("Payment channel close requires at least one signer");
+  }
+  for (const distribution of channel.distributions) {
+    if (!StellarSdk.StrKey.isValidEd25519PublicKey(distribution.publicKey)) {
+      throw new Error(`Invalid distribution address: ${distribution.publicKey}`);
+    }
+    if (!distribution.amount || Number(distribution.amount) <= 0) {
+      throw new Error(`Invalid distribution amount for ${distribution.publicKey}`);
+    }
+  }
+}
+function collectSignerKeypairs(channel) {
+  const threshold = channel.signatureThreshold ?? channel.signers.length;
+  const keypairs = channel.signers.map((signer) => signer.keypair).filter((keypair) => Boolean(keypair));
+  if (keypairs.length < threshold) {
+    throw new Error(
+      `Insufficient multi-party signoffs: ${keypairs.length}/${threshold} signatures available`
+    );
+  }
+  const unmatchedSigner = channel.signers.find(
+    (signer) => signer.keypair && signer.keypair.publicKey() !== signer.publicKey
+  );
+  if (unmatchedSigner) {
+    throw new Error(
+      `Signer keypair does not match configured public key: ${unmatchedSigner.publicKey}`
+    );
+  }
+  return keypairs.slice(0, threshold);
+}
+function buildChannelCloseTransaction(channel, sourceAccount) {
+  assertChannelReadyToClose(channel);
+  const account = sourceAccount instanceof StellarSdk.Account ? sourceAccount : new StellarSdk.Account(sourceAccount.account_id, sourceAccount.sequence);
+  const asset = resolveAsset(channel.asset);
+  const fee = normalizeFee(channel.fee);
+  let builder = new StellarSdk.TransactionBuilder(account, {
+    fee,
+    networkPassphrase: channel.networkPassphrase
+  });
+  for (const distribution of channel.distributions) {
+    builder = builder.addOperation(
+      StellarSdk.Operation.payment({
+        destination: distribution.publicKey,
+        asset,
+        amount: distribution.amount
+      })
+    );
+  }
+  return builder.setTimeout(30).build();
+}
+async function closePaymentChannel(channel, server) {
+  assertChannelReadyToClose(channel);
+  const signerKeypairs = collectSignerKeypairs(channel);
+  const escrowAccount = await server.loadAccount(channel.escrowAccountId);
+  const transaction = buildChannelCloseTransaction(channel, escrowAccount);
+  for (const keypair of signerKeypairs) {
+    transaction.sign(keypair);
+  }
+  const response = await server.submitTransaction(transaction);
+  return {
+    channelId: channel.id,
+    status: "closed",
+    transactionHash: response.hash,
+    escrowAccountId: channel.escrowAccountId,
+    distributions: channel.distributions.map((distribution) => ({ ...distribution })),
+    closedAt: (/* @__PURE__ */ new Date()).toISOString()
+  };
+}
+
+// src/stellar.service.ts
+var StellarSdk2 = __toESM(require("stellar-sdk"));
 var StellarService = class {
   server;
   sourceKeypair;
   constructor() {
     const networkUrl = process.env.STELLAR_NETWORK_URL || "https://horizon-testnet.stellar.org";
-    this.server = new StellarSdk.Horizon.Server(networkUrl);
+    this.server = new StellarSdk2.Horizon.Server(networkUrl);
     const secret = process.env.STELLAR_STORAGE_SECRET || "SAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
     try {
-      this.sourceKeypair = StellarSdk.Keypair.fromSecret(secret);
+      this.sourceKeypair = StellarSdk2.Keypair.fromSecret(secret);
     } catch {
       console.warn("Invalid STELLAR_STORAGE_SECRET. Stellar operations will fail.");
     }
@@ -55,12 +156,12 @@ var StellarService = class {
   async sendFunds(destinationAddress, amount, assetCode, assetIssuer) {
     try {
       const sourceAccount = await this.server.loadAccount(this.sourceKeypair.publicKey());
-      const asset = assetCode && assetIssuer ? new StellarSdk.Asset(assetCode, assetIssuer) : StellarSdk.Asset.native();
-      const transaction = new StellarSdk.TransactionBuilder(sourceAccount, {
-        fee: StellarSdk.BASE_FEE,
-        networkPassphrase: process.env.STELLAR_NETWORK_URL?.includes("public") ? StellarSdk.Networks.PUBLIC : StellarSdk.Networks.TESTNET
+      const asset = assetCode && assetIssuer ? new StellarSdk2.Asset(assetCode, assetIssuer) : StellarSdk2.Asset.native();
+      const transaction = new StellarSdk2.TransactionBuilder(sourceAccount, {
+        fee: StellarSdk2.BASE_FEE,
+        networkPassphrase: process.env.STELLAR_NETWORK_URL?.includes("public") ? StellarSdk2.Networks.PUBLIC : StellarSdk2.Networks.TESTNET
       }).addOperation(
-        StellarSdk.Operation.payment({
+        StellarSdk2.Operation.payment({
           destination: destinationAddress,
           asset,
           amount
@@ -75,14 +176,8 @@ var StellarService = class {
     }
   }
   async createReceivePayment(params) {
-    const {
-      address,
-      timeoutMs = 3e4,
-      assetCode,
-      assetIssuer,
-      from
-    } = params;
-    if (!StellarSdk.StrKey.isValidEd25519PublicKey(address)) {
+    const { address, timeoutMs = 3e4, assetCode, assetIssuer, from } = params;
+    if (!StellarSdk2.StrKey.isValidEd25519PublicKey(address)) {
       throw new Error(`Invalid Stellar address: ${address}`);
     }
     return new Promise((resolve, reject) => {
@@ -147,5 +242,7 @@ var StellarService = class {
 };
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
-  StellarService
+  StellarService,
+  buildChannelCloseTransaction,
+  closePaymentChannel
 });

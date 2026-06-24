@@ -8,4 +8,17 @@ export interface PaymentIntentType {
   createdAt: Date;
   updatedAt: Date;
 }
+
+export type {
+  Horizon,
+  PaymentChannelStatus,
+  PaymentChannelAsset,
+  PaymentChannelDistribution,
+  PaymentChannelSigner,
+  PaymentChannel,
+  ChannelCloseResult,
+} from './payment-channel';
+
+export { buildChannelCloseTransaction, closePaymentChannel } from './payment-channel';
+
 export * from './stellar.service';
