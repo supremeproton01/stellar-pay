@@ -44,6 +44,7 @@ model PaymentIntent {
   currency   String                @db.VarChar(3)
   status     PaymentIntentStatus   @default(PENDING)
   createdAt  DateTime              @default(now()) @map("created_at")
+  deletedAt  DateTime?             @map("deleted_at")
   updatedAt  DateTime              @updatedAt @map("updated_at")
 
   merchant Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
@@ -66,6 +67,7 @@ model WebhookEndpoint {
   url        String
   secret     String
   createdAt  DateTime @default(now()) @map("created_at")
+  deletedAt  DateTime? @map("deleted_at")
   updatedAt  DateTime @updatedAt @map("updated_at")
 
   merchant      Merchant       @relation(fields: [merchantId], references: [id], onDelete: Cascade)

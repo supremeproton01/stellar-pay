@@ -24,6 +24,31 @@ type PaginationInclude<TArgs extends PaginateArgs> = TArgs extends { include?: i
   ? TInclude
   : never;
 
+type SoftDeleteArgs = {
+  where?: unknown;
+};
+
+type SoftDeleteUpdateArgs<TWhere = unknown, TData = { deletedAt: Date }> = {
+  where: TWhere;
+  data: TData;
+};
+
+type SoftDeleteQuery<TArgs extends SoftDeleteArgs, TResult> = {
+  findMany(args?: TArgs): Promise<TResult[]>;
+};
+
+type SoftDeleteMutation<TArgs extends SoftDeleteUpdateArgs, TResult> = {
+  update(args: TArgs): Promise<TResult>;
+};
+
+type SoftDeleteMiddlewareParams = {
+  model?: string;
+  action: string;
+  args?: Record<string, unknown>;
+};
+
+type SoftDeleteMiddlewareNext = (params: SoftDeleteMiddlewareParams) => Promise<unknown>;
+
 export interface PaginationOptions<TArgs extends PaginateArgs = PaginateArgs> {
   page?: number;
   limit?: number;
@@ -52,6 +77,13 @@ export interface PaginationQuery<TArgs extends PaginateArgs, TResult> {
 export class PrismaService extends PrismaClient implements OnModuleInit, OnModuleDestroy {
   private static readonly DEFAULT_PAGE = 1;
   private static readonly DEFAULT_LIMIT = 20;
+  private static readonly SOFT_DELETE_FIELD = 'deletedAt';
+  private static readonly SOFT_DELETE_MODELS = new Set(['WebhookEndpoint', 'PaymentIntent']);
+
+  constructor() {
+    super();
+    this.registerSoftDeleteMiddleware();
+  }
 
   async onModuleInit(): Promise<void> {
     await this.$connect();
@@ -59,6 +91,23 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
 
   async onModuleDestroy(): Promise<void> {
     await this.$disconnect();
+  }
+
+  async findActive<TArgs extends SoftDeleteArgs, TResult>(
+    query: SoftDeleteQuery<TArgs, TResult>,
+    args?: TArgs,
+  ): Promise<TResult[]> {
+    return query.findMany(this.withActiveWhere(args) as TArgs);
+  }
+
+  async softDelete<TWhere, TData extends { deletedAt: Date }, TResult>(
+    query: SoftDeleteMutation<SoftDeleteUpdateArgs<TWhere, TData>, TResult>,
+    where: TWhere,
+  ): Promise<TResult> {
+    return query.update({
+      where,
+      data: { deletedAt: new Date() } as TData,
+    });
   }
 
   async paginate<TArgs extends PaginateArgs, TResult>(
@@ -114,5 +163,110 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
     return {
       [options.sortBy]: options.sortOrder ?? 'asc',
     } as TArgs['orderBy'];
+  }
+
+  private registerSoftDeleteMiddleware(): void {
+    const prismaClient = this as PrismaClient & {
+      $use?: (
+        middleware: (
+          params: SoftDeleteMiddlewareParams,
+          next: SoftDeleteMiddlewareNext,
+        ) => Promise<unknown>,
+      ) => void;
+    };
+
+    prismaClient.$use?.(async (params, next) => {
+      if (!this.isSoftDeleteModel(params.model)) {
+        return next(params);
+      }
+
+      switch (params.action) {
+        case 'findUnique':
+          params.action = 'findFirst';
+          params.args = this.withActiveWhere(params.args);
+          break;
+        case 'findUniqueOrThrow':
+          params.action = 'findFirstOrThrow';
+          params.args = this.withActiveWhere(params.args);
+          break;
+        case 'findFirst':
+        case 'findFirstOrThrow':
+        case 'findMany':
+        case 'count':
+          params.args = this.withActiveWhere(params.args);
+          break;
+        case 'delete':
+          params.action = 'update';
+          params.args = this.withSoftDeleteData(params.args);
+          break;
+        case 'deleteMany':
+          params.action = 'updateMany';
+          params.args = this.withSoftDeleteData(this.withActiveWhere(params.args));
+          break;
+        default:
+          break;
+      }
+
+      return next(params);
+    });
+  }
+
+  private isSoftDeleteModel(model: string | undefined): boolean {
+    return model !== undefined && PrismaService.SOFT_DELETE_MODELS.has(model);
+  }
+
+  private withActiveWhere(args: Record<string, unknown> | undefined): Record<string, unknown> {
+    const currentArgs = args ?? {};
+    const currentWhere = this.asRecord(currentArgs.where);
+
+    if (this.hasDeletedAtFilter(currentWhere)) {
+      return currentArgs;
+    }
+
+    return {
+      ...currentArgs,
+      where: currentWhere
+        ? {
+            AND: [currentWhere, { [PrismaService.SOFT_DELETE_FIELD]: null }],
+          }
+        : { [PrismaService.SOFT_DELETE_FIELD]: null },
+    };
+  }
+
+  private withSoftDeleteData(args: Record<string, unknown> | undefined): Record<string, unknown> {
+    const currentArgs = args ?? {};
+    const currentData = this.asRecord(currentArgs.data);
+
+    return {
+      ...currentArgs,
+      data: {
+        ...currentData,
+        [PrismaService.SOFT_DELETE_FIELD]: new Date(),
+      },
+    };
+  }
+
+  private hasDeletedAtFilter(value: unknown): boolean {
+    if (Array.isArray(value)) {
+      return value.some((item) => this.hasDeletedAtFilter(item));
+    }
+
+    if (!this.isRecord(value)) {
+      return false;
+    }
+
+    if (PrismaService.SOFT_DELETE_FIELD in value) {
+      return true;
+    }
+
+    return Object.values(value).some((item) => this.hasDeletedAtFilter(item));
+  }
+
+  private asRecord(value: unknown): Record<string, unknown> | undefined {
+    return this.isRecord(value) ? value : undefined;
+  }
+
+  private isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
   }
 }
