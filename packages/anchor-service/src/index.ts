@@ -30,3 +30,5 @@ export type {
 export type { KycStatusResponse } from './interfaces/kyc.interface';
 export type { FeeQuote, FeeBreakdown, TransactionType } from './interfaces/fee.interface';
 export type { PaymentStatusResponse } from './interfaces/payment-status.interface';
+export { configureAnchorAssets } from './configure-anchor-assets';
+export type { AnchorAsset, AnchorConfig } from './interfaces/anchor-asset.interface';
