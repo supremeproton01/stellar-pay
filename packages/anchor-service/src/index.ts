@@ -34,3 +34,8 @@ export type {
   DepositParams,
   DepositResponse,
 } from './interfaces/sep24.interface';
+export type {
+  SwapParams,
+  SwapResult,
+  StellarAsset,
+} from './interfaces/swap.interface';

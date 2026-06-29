@@ -23,6 +23,7 @@ import type { KycStatusResponse } from './interfaces/kyc.interface';
 import type { FeeQuote, TransactionType } from './interfaces/fee.interface';
 import type { PaymentStatusResponse } from './interfaces/payment-status.interface';
 import type { DepositParams, DepositResponse } from './interfaces/sep24.interface';
+import type { SwapParams, SwapResult, StellarAsset } from './interfaces/swap.interface';
 
 interface CustomerRecord {
   customerId: string;
@@ -66,12 +67,29 @@ interface Sep24DepositRecord {
   updatedAt: string;
 }
 
+interface SwapRecord {
+  swapId: string;
+  sourceAccount: string;
+  sourceAsset: StellarAsset;
+  sourceAmount: string;
+  destinationAccount: string;
+  destinationAsset: StellarAsset;
+  destinationAmount: string;
+  stellarTransactionHash?: string;
+  status: 'pending' | 'completed' | 'failed';
+  error?: string;
+  createdAt: string;
+  updatedAt: string;
+  path?: StellarAsset[];
+}
+
 export class AnchorService {
   private readonly payments = new Map<string, Sep31PaymentRecord>();
   private readonly transactions = new Map<string, AnchorTransaction>();
   private readonly customers = new Map<string, CustomerRecord>();
   private readonly accountLinks = new Map<string, string>();
   private readonly sep24Deposits = new Map<string, Sep24DepositRecord>();
+  private readonly swaps = new Map<string, SwapRecord>();
 
   // ---------------------------------------------------------------------------
   // SEP-31 Direct Payment
@@ -856,5 +874,98 @@ export class AnchorService {
     }
 
     return undefined;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Atomic Asset Swap
+  // ---------------------------------------------------------------------------
+
+  async swapAssets(params: SwapParams): Promise<SwapResult> {
+    const swapId = `swap_${crypto.randomUUID().split('-').join('').slice(0, 16)}`;
+    const parsedSourceAmount = parseFloat(params.sourceAmount);
+
+    if (isNaN(parsedSourceAmount) || parsedSourceAmount <= 0) {
+      const errorMessage = 'Invalid source amount';
+      return {
+        success: false,
+        swapId,
+        sourceAsset: params.sourceAsset,
+        sourceAmount: params.sourceAmount,
+        destinationAsset: params.destinationAsset,
+        destinationAmount: params.destinationAmount ?? '0',
+        status: 'failed',
+        error: errorMessage,
+        createdAt: new Date().toISOString(),
+        path: params.path,
+      };
+    }
+
+    // Calculate destination amount (simplified for now; real implementation would query liquidity pools/order books)
+    const destinationAmount = params.destinationAmount ?? (parsedSourceAmount * 0.99).toFixed(7);
+
+    const record: SwapRecord = {
+      swapId,
+      sourceAccount: params.sourceAccount,
+      sourceAsset: params.sourceAsset,
+      sourceAmount: params.sourceAmount,
+      destinationAccount: params.destinationAccount,
+      destinationAsset: params.destinationAsset,
+      destinationAmount,
+      status: 'pending',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      path: params.path,
+    };
+
+    this.swaps.set(swapId, record);
+
+    try {
+      const txHash = `tx_${crypto.randomUUID().split('-').join('').slice(0, 16)}`;
+
+      record.stellarTransactionHash = txHash;
+      record.status = 'completed';
+      record.updatedAt = new Date().toISOString();
+      this.swaps.set(swapId, record);
+
+      return {
+        success: true,
+        swapId,
+        stellarTransactionHash: txHash,
+        sourceAsset: params.sourceAsset,
+        sourceAmount: params.sourceAmount,
+        destinationAsset: params.destinationAsset,
+        destinationAmount,
+        status: 'completed',
+        createdAt: record.createdAt,
+        path: params.path,
+      };
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      record.status = 'failed';
+      record.error = errorMessage;
+      record.updatedAt = new Date().toISOString();
+      this.swaps.set(swapId, record);
+
+      return {
+        success: false,
+        swapId,
+        sourceAsset: params.sourceAsset,
+        sourceAmount: params.sourceAmount,
+        destinationAsset: params.destinationAsset,
+        destinationAmount,
+        status: 'failed',
+        error: errorMessage,
+        createdAt: record.createdAt,
+        path: params.path,
+      };
+    }
+  }
+
+  getSwap(swapId: string): SwapRecord | undefined {
+    return this.swaps.get(swapId);
+  }
+
+  getAllSwaps(): SwapRecord[] {
+    return Array.from(this.swaps.values());
   }
 }
