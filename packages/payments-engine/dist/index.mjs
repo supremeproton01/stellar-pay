@@ -241,6 +241,16 @@ async function closePaymentChannel(channel, server) {
   };
 }
 
+// src/transaction.ts
+function buildSignedTransaction(builder, keypair) {
+  const transaction = builder.build();
+  if (!transaction.operations.length) {
+    throw new Error("Transaction must contain at least one operation");
+  }
+  transaction.sign(keypair);
+  return transaction;
+}
+
 // src/index.ts
 var stellarService = new StellarService();
 async function sendStellarPayment(to, amount, asset) {
@@ -249,6 +259,7 @@ async function sendStellarPayment(to, amount, asset) {
 export {
   StellarService,
   buildChannelCloseTransaction,
+  buildSignedTransaction,
   closePaymentChannel,
   sendStellarPayment
 };
