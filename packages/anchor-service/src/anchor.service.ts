@@ -151,12 +151,8 @@ export class AnchorService {
     const errors: Record<string, string> = {};
     const invalidFields: string[] = [];
 
-    // Type guard to ensure we have the right structure
     const kycData = kyc as Sep12KycData & Record<string, unknown>;
 
-    // =========================================================================
-    // Check required fields
-    // =========================================================================
     if (!kycData.firstName || typeof kycData.firstName !== 'string' || !kycData.firstName.trim()) {
       errors['firstName'] = 'First name is required and must be a non-empty string';
       invalidFields.push('firstName');
@@ -181,11 +177,6 @@ export class AnchorService {
       invalidFields.push('countryCode');
     }
 
-    // =========================================================================
-    // Field format validation
-    // =========================================================================
-
-    // Email validation regex
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (kycData.email && typeof kycData.email === 'string' && !emailRegex.test(kycData.email)) {
       errors['email'] = 'Email format is invalid';
@@ -194,27 +185,21 @@ export class AnchorService {
       }
     }
 
-    // Phone number validation: basic international format
     if (kycData.phoneNumber && typeof kycData.phoneNumber === 'string') {
-      const phoneRegex = /^\+?[1-9]\d{1,14}$/; // E.164 format
+      const phoneRegex = /^\+?[1-9]\d{1,14}$/;
       if (!phoneRegex.test(kycData.phoneNumber.replace(/[\s\-()]/g, ''))) {
         errors['phoneNumber'] = 'Phone number must be in valid international format';
         invalidFields.push('phoneNumber');
       }
     }
 
-    // =========================================================================
-    // Country-specific field requirements
-    // =========================================================================
     const countryCode = (kycData.countryCode as string)?.toUpperCase();
 
-    // US: Requires SSN (stored in bankAccountNumber for this implementation)
     if (countryCode === 'US') {
       if (!kycData.bankAccountNumber) {
         errors['bankAccountNumber'] = 'SSN is required for US residents';
         invalidFields.push('bankAccountNumber');
       } else if (typeof kycData.bankAccountNumber === 'string') {
-        // Basic SSN validation: XXX-XX-XXXX or XXXXXXXXX
         const ssnRegex = /^\d{3}-?\d{2}-?\d{4}$/;
         if (!ssnRegex.test(kycData.bankAccountNumber)) {
           errors['bankAccountNumber'] = 'SSN must be in format XXX-XX-XXXX or XXXXXXXXX';
@@ -223,42 +208,17 @@ export class AnchorService {
       }
     }
 
-    // EU countries: Require date of birth
     const euCountries = [
-      'AT',
-      'BE',
-      'BG',
-      'HR',
-      'CY',
-      'CZ',
-      'DK',
-      'EE',
-      'FI',
-      'FR',
-      'DE',
-      'GR',
-      'HU',
-      'IE',
-      'IT',
-      'LV',
-      'LT',
-      'LU',
-      'MT',
-      'NL',
-      'PL',
-      'PT',
-      'RO',
-      'SK',
-      'SI',
-      'ES',
-      'SE',
+      'AT', 'BE', 'BG', 'HR', 'CY', 'CZ', 'DK', 'EE',
+      'FI', 'FR', 'DE', 'GR', 'HU', 'IE', 'IT', 'LV',
+      'LT', 'LU', 'MT', 'NL', 'PL', 'PT', 'RO', 'SK',
+      'SI', 'ES', 'SE',
     ];
     if (euCountries.includes(countryCode)) {
       if (!kycData.dateOfBirth) {
         errors['dateOfBirth'] = 'Date of birth is required for EU residents';
         invalidFields.push('dateOfBirth');
       } else if (typeof kycData.dateOfBirth === 'string') {
-        // Validate ISO date format YYYY-MM-DD
         const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
         if (!dateRegex.test(kycData.dateOfBirth)) {
           errors['dateOfBirth'] = 'Date of birth must be in YYYY-MM-DD format';
@@ -269,7 +229,6 @@ export class AnchorService {
             errors['dateOfBirth'] = 'Date of birth is not a valid date';
             invalidFields.push('dateOfBirth');
           } else {
-            // Check if person is at least 18 years old
             const today = new Date();
             const age = today.getFullYear() - dob.getFullYear();
             const monthDiff = today.getMonth() - dob.getMonth();
@@ -284,7 +243,6 @@ export class AnchorService {
       }
     }
 
-    // Return structured validation result
     return {
       isValid: invalidFields.length === 0,
       invalidFields: invalidFields.length > 0 ? invalidFields : undefined,
@@ -387,6 +345,10 @@ export class AnchorService {
   getAllTransactions(): AnchorTransaction[] {
     return Array.from(this.transactions.values());
   }
+
+  // ---------------------------------------------------------------------------
+  // SEP-6 Transaction History
+  // ---------------------------------------------------------------------------
 
   async fetchTransactionHistory(params: HistoryParams): Promise<TransactionHistoryResult> {
     const {
@@ -729,14 +691,6 @@ export class AnchorService {
   private async handleDocumentUpload(
     _document: Record<string, unknown> | IdentityDocument,
   ): Promise<boolean> {
-    // TODO: Implement actual file upload to anchor's SEP-12 endpoint
-    // const formData = new FormData();
-    // formData.append('file', document.file);
-    // const response = await fetch('https://anchor.example.com/sep12/customer', {
-    //   method: 'PUT',
-    //   body: formData,
-    // });
-    // return response.ok;
     return true;
   }
 
