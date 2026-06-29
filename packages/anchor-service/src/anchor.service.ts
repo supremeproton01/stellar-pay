@@ -21,6 +21,7 @@ import type {
 } from './interfaces/customer.interface';
 import type { KycStatusResponse } from './interfaces/kyc.interface';
 import type { FeeQuote, TransactionType } from './interfaces/fee.interface';
+import type { PaymentStatusResponse } from './interfaces/payment-status.interface';
 
 interface CustomerRecord {
   customerId: string;
@@ -737,5 +738,35 @@ export class AnchorService {
     // });
     // return response.ok;
     return true;
+  }
+
+  getPaymentStatus(paymentId: string): PaymentStatusResponse | undefined {
+    const payment = this.payments.get(paymentId);
+    if (payment) {
+      return {
+        paymentId: payment.paymentId,
+        status: payment.status,
+        amount: payment.amount,
+        assetCode: payment.assetCode,
+        createdAt: payment.createdAt,
+        updatedAt: payment.updatedAt,
+        error: payment.error,
+      };
+    }
+
+    const transaction = this.transactions.get(paymentId);
+    if (transaction) {
+      return {
+        paymentId: transaction.id,
+        status: transaction.status,
+        amount: String(transaction.amount),
+        assetCode: transaction.asset,
+        createdAt: transaction.createdAt,
+        updatedAt: transaction.updatedAt,
+        error: transaction.errorMessage,
+      };
+    }
+
+    return undefined;
   }
 }
