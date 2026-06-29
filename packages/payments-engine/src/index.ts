@@ -9,3 +9,16 @@ export async function sendStellarPayment(
 ): Promise<string> {
   return stellarService.sendFunds(to, amount.toString(), asset === 'XLM' ? undefined : asset);
 }
+export type {
+  Horizon,
+  PaymentChannelStatus,
+  PaymentChannelAsset,
+  PaymentChannelDistribution,
+  PaymentChannelSigner,
+  PaymentChannel,
+  ChannelCloseResult,
+} from './payment-channel';
+
+export { buildChannelCloseTransaction, closePaymentChannel } from './payment-channel';
+
+export * from './stellar.service';

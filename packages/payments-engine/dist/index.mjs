@@ -142,11 +142,113 @@ var StellarService = class {
   }
 };
 
+// src/payment-channel.ts
+import * as StellarSdk2 from "stellar-sdk";
+function resolveAsset(asset) {
+  const code = asset.code?.trim();
+  const isNative = !code || code === "native" || code === "XLM";
+  if (isNative) {
+    if (asset.issuer) {
+      throw new Error("Native asset cannot include an issuer");
+    }
+    return StellarSdk2.Asset.native();
+  }
+  if (!asset.issuer) {
+    throw new Error(`Issuer is required for asset ${code}`);
+  }
+  return new StellarSdk2.Asset(code, asset.issuer);
+}
+function normalizeFee(fee) {
+  const feeValue = fee === void 0 ? Number(StellarSdk2.BASE_FEE) : Number(fee);
+  if (!Number.isFinite(feeValue) || feeValue <= 0) {
+    throw new Error(`Invalid fee: ${String(fee)}`);
+  }
+  return String(Math.trunc(feeValue));
+}
+function assertChannelReadyToClose(channel) {
+  if (channel.status === "closed") {
+    throw new Error(`Payment channel ${channel.id} is already closed`);
+  }
+  if (!channel.distributions.length) {
+    throw new Error("Payment channel close requires at least one distribution");
+  }
+  if (!channel.signers.length) {
+    throw new Error("Payment channel close requires at least one signer");
+  }
+  for (const distribution of channel.distributions) {
+    if (!StellarSdk2.StrKey.isValidEd25519PublicKey(distribution.publicKey)) {
+      throw new Error(`Invalid distribution address: ${distribution.publicKey}`);
+    }
+    if (!distribution.amount || Number(distribution.amount) <= 0) {
+      throw new Error(`Invalid distribution amount for ${distribution.publicKey}`);
+    }
+  }
+}
+function collectSignerKeypairs(channel) {
+  const threshold = channel.signatureThreshold ?? channel.signers.length;
+  const keypairs = channel.signers.map((signer) => signer.keypair).filter((keypair) => Boolean(keypair));
+  if (keypairs.length < threshold) {
+    throw new Error(
+      `Insufficient multi-party signoffs: ${keypairs.length}/${threshold} signatures available`
+    );
+  }
+  const unmatchedSigner = channel.signers.find(
+    (signer) => signer.keypair && signer.keypair.publicKey() !== signer.publicKey
+  );
+  if (unmatchedSigner) {
+    throw new Error(
+      `Signer keypair does not match configured public key: ${unmatchedSigner.publicKey}`
+    );
+  }
+  return keypairs.slice(0, threshold);
+}
+function buildChannelCloseTransaction(channel, sourceAccount) {
+  assertChannelReadyToClose(channel);
+  const account = sourceAccount instanceof StellarSdk2.Account ? sourceAccount : new StellarSdk2.Account(sourceAccount.account_id, sourceAccount.sequence);
+  const asset = resolveAsset(channel.asset);
+  const fee = normalizeFee(channel.fee);
+  let builder = new StellarSdk2.TransactionBuilder(account, {
+    fee,
+    networkPassphrase: channel.networkPassphrase
+  });
+  for (const distribution of channel.distributions) {
+    builder = builder.addOperation(
+      StellarSdk2.Operation.payment({
+        destination: distribution.publicKey,
+        asset,
+        amount: distribution.amount
+      })
+    );
+  }
+  return builder.setTimeout(30).build();
+}
+async function closePaymentChannel(channel, server) {
+  assertChannelReadyToClose(channel);
+  const signerKeypairs = collectSignerKeypairs(channel);
+  const escrowAccount = await server.loadAccount(channel.escrowAccountId);
+  const transaction = buildChannelCloseTransaction(channel, escrowAccount);
+  for (const keypair of signerKeypairs) {
+    transaction.sign(keypair);
+  }
+  const response = await server.submitTransaction(transaction);
+  return {
+    channelId: channel.id,
+    status: "closed",
+    transactionHash: response.hash,
+    escrowAccountId: channel.escrowAccountId,
+    distributions: channel.distributions.map((distribution) => ({ ...distribution })),
+    closedAt: (/* @__PURE__ */ new Date()).toISOString()
+  };
+}
+
 // src/index.ts
 var stellarService = new StellarService();
 async function sendStellarPayment(to, amount, asset) {
   return stellarService.sendFunds(to, amount.toString(), asset === "XLM" ? void 0 : asset);
 }
 export {
+  StellarService,
+  buildChannelCloseTransaction,
+  closePaymentChannel,
   sendStellarPayment
 };
