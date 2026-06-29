@@ -34,6 +34,7 @@ __export(index_exports, {
   buildChannelCloseTransaction: () => buildChannelCloseTransaction,
   closePaymentChannel: () => closePaymentChannel,
   createAssetPayment: () => createAssetPayment,
+  createPaymentChannel: () => createPaymentChannel,
   sendStellarPayment: () => sendStellarPayment
 });
 module.exports = __toCommonJS(index_exports);
@@ -210,6 +211,44 @@ var StellarService = class {
 
 // src/payment-channel.ts
 var StellarSdk2 = __toESM(require("stellar-sdk"));
+async function createPaymentChannel(config) {
+  const { id, asset, distributions, signers, networkPassphrase, fee, signatureThreshold } = config;
+  if (!id) {
+    throw new Error("Payment channel id is required");
+  }
+  if (!signers.length) {
+    throw new Error("At least one signer is required");
+  }
+  if (!distributions.length) {
+    throw new Error("At least one distribution is required");
+  }
+  for (const signer of signers) {
+    if (!StellarSdk2.StrKey.isValidEd25519PublicKey(signer.publicKey)) {
+      throw new Error(`Invalid signer public key: ${signer.publicKey}`);
+    }
+  }
+  for (const distribution of distributions) {
+    if (!StellarSdk2.StrKey.isValidEd25519PublicKey(distribution.publicKey)) {
+      throw new Error(`Invalid distribution address: ${distribution.publicKey}`);
+    }
+    if (!distribution.amount || Number(distribution.amount) <= 0) {
+      throw new Error(`Invalid distribution amount for ${distribution.publicKey}`);
+    }
+  }
+  const escrowKeypair = StellarSdk2.Keypair.random();
+  const channel = {
+    id,
+    escrowAccountId: escrowKeypair.publicKey(),
+    status: "open",
+    asset,
+    distributions,
+    signers,
+    networkPassphrase,
+    fee,
+    signatureThreshold
+  };
+  return channel;
+}
 function resolveAsset(asset) {
   const code = asset.code?.trim();
   const isNative = !code || code === "native" || code === "XLM";
@@ -321,5 +360,6 @@ async function createAssetPayment(params) {
   buildChannelCloseTransaction,
   closePaymentChannel,
   createAssetPayment,
+  createPaymentChannel,
   sendStellarPayment
 });

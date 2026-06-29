@@ -13,6 +13,7 @@ export async function sendStellarPayment(
 export async function createAssetPayment(params: AssetPaymentParams): Promise<PaymentResult> {
   return stellarService.createAssetPayment(params);
 }
+
 export type {
   Horizon,
   PaymentChannelStatus,
@@ -20,9 +21,14 @@ export type {
   PaymentChannelDistribution,
   PaymentChannelSigner,
   PaymentChannel,
+  PaymentChannelConfig,
   ChannelCloseResult,
 } from './payment-channel';
 
-export { buildChannelCloseTransaction, closePaymentChannel } from './payment-channel';
+export {
+  buildChannelCloseTransaction,
+  closePaymentChannel,
+  createPaymentChannel,
+} from './payment-channel';
 
 export * from './stellar.service';

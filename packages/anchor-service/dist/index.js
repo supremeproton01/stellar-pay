@@ -32,6 +32,7 @@ var AnchorService = class {
   transactions = /* @__PURE__ */ new Map();
   customers = /* @__PURE__ */ new Map();
   accountLinks = /* @__PURE__ */ new Map();
+  sep24Deposits = /* @__PURE__ */ new Map();
   // ---------------------------------------------------------------------------
   // SEP-31 Direct Payment
   // ---------------------------------------------------------------------------
@@ -568,6 +569,98 @@ var AnchorService = class {
   async handleDocumentUpload(_document) {
     return true;
   }
+  // ---------------------------------------------------------------------------
+  // SEP-24 Deposit Flow
+  // ---------------------------------------------------------------------------
+  async createSep24Deposit(params) {
+    const transactionId = `sep24_${crypto.randomUUID().split("-").join("").slice(0, 16)}`;
+    try {
+      const interactiveUrl = this.buildInteractiveUrl(params, transactionId);
+      const record = {
+        transactionId,
+        account: params.account,
+        assetCode: params.assetCode,
+        amount: params.amount,
+        status: "pending",
+        interactiveUrl,
+        createdAt: (/* @__PURE__ */ new Date()).toISOString(),
+        updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+      };
+      this.sep24Deposits.set(transactionId, record);
+      return {
+        success: true,
+        transactionId,
+        interactiveUrl,
+        amount: params.amount,
+        assetCode: params.assetCode,
+        status: "pending",
+        createdAt: record.createdAt,
+        updatedAt: record.updatedAt
+      };
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      const record = {
+        transactionId,
+        account: params.account,
+        assetCode: params.assetCode,
+        amount: params.amount,
+        status: "failed",
+        error: errorMessage,
+        createdAt: (/* @__PURE__ */ new Date()).toISOString(),
+        updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+      };
+      this.sep24Deposits.set(transactionId, record);
+      return {
+        success: false,
+        transactionId,
+        error: errorMessage,
+        amount: params.amount,
+        assetCode: params.assetCode,
+        status: "failed",
+        createdAt: record.createdAt,
+        updatedAt: record.updatedAt
+      };
+    }
+  }
+  getSep24Deposit(transactionId) {
+    return this.sep24Deposits.get(transactionId);
+  }
+  getAllSep24Deposits() {
+    return Array.from(this.sep24Deposits.values());
+  }
+  buildInteractiveUrl(params, transactionId) {
+    const url = new URL(params.anchorUrl);
+    const pathname = url.pathname.replace(/\/$/, "");
+    url.pathname = `${pathname}/deposit/interactive`;
+    url.searchParams.set("account", params.account);
+    url.searchParams.set("asset_code", params.assetCode);
+    url.searchParams.set("transaction_id", transactionId);
+    if (params.memo) {
+      url.searchParams.set("memo", params.memo);
+    }
+    if (params.memoType) {
+      url.searchParams.set("memo_type", params.memoType);
+    }
+    if (params.amount) {
+      url.searchParams.set("amount", params.amount);
+    }
+    if (params.lang) {
+      url.searchParams.set("lang", params.lang);
+    }
+    if (params.destinationExtra) {
+      url.searchParams.set("destination_extra", params.destinationExtra);
+    }
+    if (params.destinationExtraMemo) {
+      url.searchParams.set("destination_extra_memo", params.destinationExtraMemo);
+    }
+    if (params.onChangeCallback) {
+      url.searchParams.set("on_change_callback", params.onChangeCallback);
+    }
+    if (params.quoteId) {
+      url.searchParams.set("quote_id", params.quoteId);
+    }
+    return url.toString();
+  }
   getPaymentStatus(paymentId) {
     const payment = this.payments.get(paymentId);
     if (payment) {
@@ -591,6 +684,18 @@ var AnchorService = class {
         createdAt: transaction.createdAt,
         updatedAt: transaction.updatedAt,
         error: transaction.errorMessage
+      };
+    }
+    const sep24Deposit = this.sep24Deposits.get(paymentId);
+    if (sep24Deposit) {
+      return {
+        paymentId: sep24Deposit.transactionId,
+        status: sep24Deposit.status,
+        amount: sep24Deposit.amount ?? "",
+        assetCode: sep24Deposit.assetCode,
+        createdAt: sep24Deposit.createdAt,
+        updatedAt: sep24Deposit.updatedAt,
+        error: sep24Deposit.error
       };
     }
     return void 0;
@@ -701,7 +806,9 @@ function validateAsset(asset) {
     throw new Error("Asset code is required");
   }
   if (!asset.issuer || !/^G[A-Z2-7]{55}$/.test(asset.issuer)) {
-    throw new Error(`Invalid issuer for asset ${asset.code}: must be a valid Stellar public key (G...)`);
+    throw new Error(
+      `Invalid issuer for asset ${asset.code}: must be a valid Stellar public key (G...)`
+    );
   }
   if (!asset.fiatEquivalent || !asset.fiatEquivalent.trim()) {
     throw new Error(`fiatEquivalent is required for asset ${asset.code}`);
