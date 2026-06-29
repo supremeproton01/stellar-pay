@@ -31,4 +31,6 @@ export {
   createPaymentChannel,
 } from './payment-channel';
 
+export { buildSignedTransaction } from './transaction';
+
 export * from './stellar.service';
