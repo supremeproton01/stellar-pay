@@ -1,9 +1,8 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
-import { AssetReserve, RedeemResponse } from './interfaces/proof-of-reserves.interface';
+import * as StellarSdk from '@stellar/stellar-sdk';
+import { RedeemResponse } from './interfaces/proof-of-reserves.interface';
 import { RedemptionRepository } from '../modules/database/redemption.repository';
 import { RedeemDto } from './dto/redeem.dto';
-import * as StellarSdk from '@stellar/stellar-sdk';
-import { Server } from '@stellar/stellar-sdk/rpc';
 
 interface MerchantBalance {
   merchantId: string;
@@ -336,16 +335,17 @@ export class TreasuryService {
 
     const sorobanRpcUrl = process.env.SOROBAN_RPC_URL;
     const contractId = process.env.MIRROR_ASSET_CONTRACT_ID;
+    const storageSecret = process.env.STELLAR_STORAGE_SECRET;
 
-    if (!sorobanRpcUrl || !contractId) {
+    if (!sorobanRpcUrl || !contractId || !storageSecret) {
       throw new BadRequestException(
-        'SOROBAN_RPC_URL and MIRROR_ASSET_CONTRACT_ID must be configured for redemption',
+        'SOROBAN_RPC_URL, MIRROR_ASSET_CONTRACT_ID, and STELLAR_STORAGE_SECRET must be configured for redemption',
       );
     }
 
     // 2. Invoke Soroban burn function
     const rpcServer = new Server(sorobanRpcUrl, { allowHttp: true });
-    const keypair = StellarSdk.Keypair.fromSecret(process.env.STELLAR_STORAGE_SECRET!);
+    const keypair = StellarSdk.Keypair.fromSecret(storageSecret);
     const sourceAccount = await rpcServer.getAccount(keypair.publicKey());
 
     const contract = new StellarSdk.Contract(contractId);
