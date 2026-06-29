@@ -36,6 +36,21 @@ export interface PaymentVerificationResult {
   timestamp: string;
 }
 
+export interface AssetPaymentParams {
+  destination: string;
+  amount: string;
+  assetCode: string;
+  assetIssuer: string;
+}
+
+export interface PaymentResult {
+  transactionHash: string;
+  assetCode: string;
+  assetIssuer: string;
+  amount: string;
+  destination: string;
+}
+
 type IncomingPaymentRecord =
   | StellarSdk.Horizon.ServerApi.PaymentOperationRecord
   | StellarSdk.Horizon.ServerApi.PathPaymentOperationRecord
@@ -101,6 +116,68 @@ export class StellarService {
     } catch (error) {
       console.error('Stellar transaction failed:', error);
       throw error; // Rethrow to let the worker handle the failure state
+    }
+  }
+
+  async createAssetPayment(params: AssetPaymentParams): Promise<PaymentResult> {
+    const { destination, amount, assetCode, assetIssuer } = params;
+
+    if (!StellarSdk.StrKey.isValidEd25519PublicKey(destination)) {
+      throw new Error(`Invalid destination address: ${destination}`);
+    }
+
+    const sourceAccount = await this.server.loadAccount(this.sourceKeypair.publicKey());
+
+    await this.verifyTrustline(assetCode, assetIssuer, destination);
+
+    const asset = new StellarSdk.Asset(assetCode, assetIssuer);
+
+    const transaction = new StellarSdk.TransactionBuilder(sourceAccount, {
+      fee: StellarSdk.BASE_FEE,
+      networkPassphrase: process.env.STELLAR_NETWORK_URL?.includes('public')
+        ? StellarSdk.Networks.PUBLIC
+        : StellarSdk.Networks.TESTNET,
+    })
+      .addOperation(
+        StellarSdk.Operation.payment({
+          destination,
+          asset,
+          amount,
+        }),
+      )
+      .setTimeout(30)
+      .build();
+
+    transaction.sign(this.sourceKeypair);
+
+    const response = await this.server.submitTransaction(transaction);
+
+    return {
+      transactionHash: response.hash,
+      assetCode,
+      assetIssuer,
+      amount,
+      destination,
+    };
+  }
+
+  private async verifyTrustline(
+    assetCode: string,
+    assetIssuer: string,
+    accountAddress: string,
+  ): Promise<void> {
+    const accountData = await this.server.loadAccount(accountAddress);
+    const hasTrustline = accountData.balances.some(
+      (balance: StellarSdk.Horizon.HorizonApi.BalanceLine) =>
+        balance.asset_type !== 'native' &&
+        (balance as StellarSdk.Horizon.HorizonApi.BalanceLineAsset).asset_code === assetCode &&
+        (balance as StellarSdk.Horizon.HorizonApi.BalanceLineAsset).asset_issuer === assetIssuer,
+    );
+
+    if (!hasTrustline) {
+      throw new Error(
+        `Trustline not found for asset ${assetCode}:${assetIssuer} on account ${accountAddress}`,
+      );
     }
   }
 

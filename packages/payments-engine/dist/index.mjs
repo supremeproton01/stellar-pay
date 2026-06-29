@@ -38,6 +38,45 @@ var StellarService = class {
       throw error;
     }
   }
+  async createAssetPayment(params) {
+    const { destination, amount, assetCode, assetIssuer } = params;
+    if (!StellarSdk.StrKey.isValidEd25519PublicKey(destination)) {
+      throw new Error(`Invalid destination address: ${destination}`);
+    }
+    const sourceAccount = await this.server.loadAccount(this.sourceKeypair.publicKey());
+    await this.verifyTrustline(assetCode, assetIssuer, destination);
+    const asset = new StellarSdk.Asset(assetCode, assetIssuer);
+    const transaction = new StellarSdk.TransactionBuilder(sourceAccount, {
+      fee: StellarSdk.BASE_FEE,
+      networkPassphrase: process.env.STELLAR_NETWORK_URL?.includes("public") ? StellarSdk.Networks.PUBLIC : StellarSdk.Networks.TESTNET
+    }).addOperation(
+      StellarSdk.Operation.payment({
+        destination,
+        asset,
+        amount
+      })
+    ).setTimeout(30).build();
+    transaction.sign(this.sourceKeypair);
+    const response = await this.server.submitTransaction(transaction);
+    return {
+      transactionHash: response.hash,
+      assetCode,
+      assetIssuer,
+      amount,
+      destination
+    };
+  }
+  async verifyTrustline(assetCode, assetIssuer, accountAddress) {
+    const accountData = await this.server.loadAccount(accountAddress);
+    const hasTrustline = accountData.balances.some(
+      (balance) => balance.asset_type !== "native" && balance.asset_code === assetCode && balance.asset_issuer === assetIssuer
+    );
+    if (!hasTrustline) {
+      throw new Error(
+        `Trustline not found for asset ${assetCode}:${assetIssuer} on account ${accountAddress}`
+      );
+    }
+  }
   async verifyPayment(params) {
     const { txHash, expectedDestination, expectedAmount, expectedAssetCode, expectedAssetIssuer } = params;
     try {
@@ -246,9 +285,13 @@ var stellarService = new StellarService();
 async function sendStellarPayment(to, amount, asset) {
   return stellarService.sendFunds(to, amount.toString(), asset === "XLM" ? void 0 : asset);
 }
+async function createAssetPayment(params) {
+  return stellarService.createAssetPayment(params);
+}
 export {
   StellarService,
   buildChannelCloseTransaction,
   closePaymentChannel,
+  createAssetPayment,
   sendStellarPayment
 };
